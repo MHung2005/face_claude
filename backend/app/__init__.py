@@ -15,6 +15,7 @@ from .routes.manager import manager_bp
 from .routes.face_enrollment import face_enrollment_bp
 from .routes.guest import guest_bp
 from .routes.health import health_bp
+from .routes.jetson_stream import jetson_stream_bp
 from .services.attendance import AttendanceService
 from .celery_app import create_celery
 from .services.embedding import EmbeddingService
@@ -142,5 +143,6 @@ def create_app(test_config=None):
     app.register_blueprint(guest_bp, url_prefix="/api")
     app.register_blueprint(manager_bp, url_prefix="/api")
     app.register_blueprint(face_enrollment_bp, url_prefix="/api")
+    app.register_blueprint(jetson_stream_bp) 
 
     return app
