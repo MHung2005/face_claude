@@ -13,7 +13,7 @@ import {
   normalizeCaptureConfig,
   shouldExtendCaptureAfterBatchError,
 } from "../lib/faceRegistrationCapture";
-import { cropFace, detectFaces, isModelLoaded, loadModel } from "../lib/yoloOnnxService";
+import { cropFace, detectFaces, isModelLoaded, loadModel } from "../ai";
 
 const MOCK_EMPLOYEE = {
   department: "Phòng Kế toán",

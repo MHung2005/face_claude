@@ -1,9 +1,12 @@
 import json
-import math
 from dataclasses import dataclass
+
+from ..ai import FaceQualityScorer
 
 
 EXPECTED_POSES = ("front", "left", "right", "up", "down")
+
+_quality_scorer = FaceQualityScorer()
 
 
 class FaceBatchEnrollmentError(Exception):
@@ -148,24 +151,7 @@ class FaceBatchEnrollmentService:
         return frame_hints
 
     def _score_frame(self, frame_bytes, pose_label, seed):
-        try:
-            import cv2
-            import numpy as np
-
-            arr = np.frombuffer(frame_bytes, dtype=np.uint8)
-            image = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                raise ValueError("decode_failed")
-
-            sharpness = min(cv2.Laplacian(image, cv2.CV_64F).var() / 240.0, 1.0)
-            brightness = float(image.mean()) / 255.0
-            brightness_balance = max(0.0, 1.0 - abs(brightness - 0.55) * 1.8)
-            pose_bonus = 0.05 if pose_label in EXPECTED_POSES else 0.0
-            score = 0.62 * sharpness + 0.33 * brightness_balance + pose_bonus
-            return max(0.0, min(score, 1.0))
-        except Exception:
-            pose_bonus = 0.05 if pose_label in EXPECTED_POSES else 0.0
-            return 0.55 + pose_bonus - (seed * 0.0001)
+        return _quality_scorer.score(frame_bytes, pose_label, seed)
 
     def _is_duplicate(self, candidate, accepted_frames):
         for existing in accepted_frames:
@@ -218,14 +204,4 @@ class FaceBatchEnrollmentService:
         return [value / count for value in totals]
 
     def _cosine_distance(self, left, right):
-        if len(left) != len(right):
-            return math.inf
-
-        left_norm = math.sqrt(sum(value * value for value in left))
-        right_norm = math.sqrt(sum(value * value for value in right))
-        if left_norm == 0 or right_norm == 0:
-            return math.inf
-
-        dot_product = sum(left_value * right_value for left_value, right_value in zip(left, right))
-        cosine_similarity = dot_product / (left_norm * right_norm)
-        return 1 - cosine_similarity
+        return _quality_scorer.cosine_distance(left, right)

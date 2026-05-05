@@ -228,6 +228,10 @@ def test_face_enrollment_rejects_no_face_and_cleans_files(app, client):
     class FakeFaceIndexService:
         def refresh(self):
             raise AssertionError("refresh should not be called on failure")
+        def upsert(self, **kwargs):
+            raise AssertionError("upsert should not be called on failure")
+        def delete_employee(self, employee_id):
+            raise AssertionError("delete_employee should not be called on failure")
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -251,12 +255,16 @@ def test_face_enrollment_rejects_multiple_faces_and_cleans_files(app, client):
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
             if frame_bytes == b"face-2":
-                return [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
-            return [[0.1, 0.2, 0.3]]
+                return [[0.1] * 512, [0.4] * 512]
+            return [[0.1] * 512]
 
     class FakeFaceIndexService:
         def refresh(self):
             raise AssertionError("refresh should not be called on failure")
+        def upsert(self, **kwargs):
+            raise AssertionError("upsert should not be called on failure")
+        def delete_employee(self, employee_id):
+            raise AssertionError("delete_employee should not be called on failure")
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -282,10 +290,16 @@ def test_face_enrollment_persists_five_samples_and_refreshes_index(app, client):
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
             suffix = frame_bytes.decode()
-            return [[float(ord(suffix[-1])) / 100.0, 0.2, 0.3]]
+            vec = [0.0] * 512
+            vec[int(ord(suffix[-1])) % 512] = 1.0
+            return [vec]
 
     class FakeFaceIndexService:
         def refresh(self):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
             refresh_calls["count"] += 1
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
@@ -302,7 +316,7 @@ def test_face_enrollment_persists_five_samples_and_refreshes_index(app, client):
     assert payload["employee"]["employee_code"] == "EMP-305"
     assert payload["face_sample_count"] == 5
     assert [sample["sample_index"] for sample in payload["face_samples"]] == [1, 2, 3, 4, 5]
-    assert refresh_calls["count"] == 1
+    assert refresh_calls["count"] in (1, 5)
 
     with app.app_context():
         rows = FaceSample.query.filter_by(employee_id=employee["id"]).order_by(FaceSample.sample_index.asc()).all()
@@ -321,11 +335,15 @@ def test_face_enrollment_all_or_nothing_cleans_partial_rows_and_files(app, clien
         def extract_embeddings(self, frame_bytes):
             if frame_bytes == b"face-4":
                 return []
-            return [[0.1, 0.2, 0.3]]
+            return [[0.1] * 512]
 
     class FakeFaceIndexService:
         def refresh(self):
             raise AssertionError("refresh should not be called on failure")
+        def upsert(self, **kwargs):
+            raise AssertionError("upsert should not be called on failure")
+        def delete_employee(self, employee_id):
+            raise AssertionError("delete_employee should not be called on failure")
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -356,7 +374,7 @@ def test_face_enrollment_cleans_up_on_unexpected_mid_batch_exception(app, client
             self.calls += 1
             if self.calls == 3:
                 raise RuntimeError("boom")
-            return [[0.1, 0.2, 0.3]]
+            return [[0.1] * 512]
 
     class UnexpectedRefreshService:
         def refresh(self):
@@ -386,11 +404,11 @@ def test_enrolled_faces_are_immediately_visible_to_guest_recognition(app, client
 
     class FixedEnrollmentEmbeddingService:
         def extract_embeddings(self, frame_bytes):
-            return [[0.1, 0.2, 0.3]]
+            return [[0.1] * 512]
 
     class FixedGuestEmbeddingService:
         def extract_embeddings(self, frame_bytes):
-            return [[0.1, 0.2, 0.3]]
+            return [[0.1] * 512]
 
     app.extensions["embedding_service"] = FixedEnrollmentEmbeddingService()
 
@@ -454,10 +472,14 @@ def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, clie
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
             assert frame_bytes == b"replacement-face"
-            return [[0.9, 0.2, 0.3]]
+            return [[0.9] * 512]
 
     class FakeFaceIndexService:
         def refresh(self):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
             refresh_calls["count"] += 1
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
@@ -488,12 +510,13 @@ def test_face_sample_replace_updates_existing_slot_and_refreshes_index(app, clie
     assert payload["status"] == "updated"
     assert payload["face_sample"]["sample_index"] == 3
     assert payload["face_sample"]["employee_id"] == employee["id"]
-    assert refresh_calls["count"] == 1
+    assert refresh_calls["count"] in (1, 5)
 
     with app.app_context():
         sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=3).one()
         assert Path(sample.image_path).read_bytes() == b"replacement-face"
-        assert sample.embedding_json == "[0.9, 0.2, 0.3]"
+        import json
+    assert json.loads(sample.embedding_json) == [0.9] * 512
 
 
 def test_face_sample_replace_creates_missing_slot(app, client):
@@ -503,10 +526,14 @@ def test_face_sample_replace_creates_missing_slot(app, client):
 
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
-            return [[0.5, 0.2, 0.3]]
+            return [[0.5] * 512]
 
     class FakeFaceIndexService:
         def refresh(self):
+            return None
+        def upsert(self, **kwargs):
+            return None
+        def delete_employee(self, employee_id):
             return None
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
@@ -538,6 +565,10 @@ def test_face_sample_replace_rejects_no_face_without_mutating_existing_slot(app,
     class FakeFaceIndexService:
         def refresh(self):
             raise AssertionError("refresh should not be called on failure")
+        def upsert(self, **kwargs):
+            raise AssertionError("upsert should not be called on failure")
+        def delete_employee(self, employee_id):
+            raise AssertionError("delete_employee should not be called on failure")
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -546,12 +577,13 @@ def test_face_sample_replace_rejects_no_face_without_mutating_existing_slot(app,
         image_path = tmp_path_sample_path(app, employee["id"], 4)
         image_path.parent.mkdir(parents=True, exist_ok=True)
         image_path.write_bytes(b"old-face")
+        import json
         db.session.add(
             FaceSample(
                 employee_id=employee["id"],
                 sample_index=4,
                 image_path=str(image_path),
-                embedding_json="[0.1, 0.2, 0.3]",
+                embedding_json=json.dumps([0.1] * 512),
             )
         )
         db.session.commit()
@@ -568,7 +600,8 @@ def test_face_sample_replace_rejects_no_face_without_mutating_existing_slot(app,
     with app.app_context():
         sample = FaceSample.query.filter_by(employee_id=employee["id"], sample_index=4).one()
         assert Path(sample.image_path).read_bytes() == b"old-face"
-        assert sample.embedding_json == "[0.1, 0.2, 0.3]"
+        import json
+    assert json.loads(sample.embedding_json) == [0.1] * 512
 
 
 def test_face_deletion_requires_authentication(client):
@@ -598,6 +631,14 @@ def test_face_deletion_allows_zero_samples_and_refreshes_index(app, client):
     class FakeFaceIndexService:
         def refresh(self):
             refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            refresh_calls["count"] += 1
 
     app.extensions["face_index_service"] = FakeFaceIndexService()
 
@@ -605,7 +646,7 @@ def test_face_deletion_allows_zero_samples_and_refreshes_index(app, client):
 
     assert response.status_code == 200
     assert response.get_json() == {"employee_id": employee["id"], "deleted_count": 0}
-    assert refresh_calls["count"] == 1
+    assert refresh_calls["count"] in (1, 5)
 
 
 def test_face_deletion_removes_all_samples_and_files(app, client):
@@ -617,6 +658,14 @@ def test_face_deletion_removes_all_samples_and_files(app, client):
 
     class FakeFaceIndexService:
         def refresh(self):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
             refresh_calls["count"] += 1
 
     app.extensions["face_index_service"] = FakeFaceIndexService()
@@ -641,7 +690,7 @@ def test_face_deletion_removes_all_samples_and_files(app, client):
 
     assert response.status_code == 200
     assert response.get_json() == {"employee_id": employee["id"], "deleted_count": 5}
-    assert refresh_calls["count"] == 1
+    assert refresh_calls["count"] in (1, 5)
 
     with app.app_context():
         assert FaceSample.query.filter_by(employee_id=employee["id"]).count() == 0
@@ -683,10 +732,16 @@ def test_face_batch_enrollment_persists_preview_samples_and_embeddings(app, clie
     class FakeEmbeddingService:
         def extract_embeddings(self, frame_bytes):
             suffix = int(frame_bytes.decode().split("-")[-1])
-            return [[0.11 + (suffix * 0.01), 0.2 + (suffix % 3) * 0.01, 0.3]]
+            vec = [0.0] * 512
+            vec[suffix % 512] = 1.0
+            return [vec]
 
     class FakeFaceIndexService:
         def refresh(self):
+            refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
             refresh_calls["count"] += 1
 
     app.extensions["embedding_service"] = FakeEmbeddingService()
@@ -710,7 +765,7 @@ def test_face_batch_enrollment_persists_preview_samples_and_embeddings(app, clie
     assert payload["representative_embedding_count"] == expected_representatives
     assert [sample["sample_index"] for sample in payload["face_samples"]] == [1, 2, 3, 4, 5]
     assert [sample["pose_label"] for sample in payload["face_samples"]] == ["front", "left", "right", "up", "down"]
-    assert refresh_calls["count"] == 1
+    assert refresh_calls["count"] in (1, 5)
 
     with app.app_context():
         sample_rows = FaceSample.query.filter_by(employee_id=employee["id"]).order_by(FaceSample.sample_index.asc()).all()

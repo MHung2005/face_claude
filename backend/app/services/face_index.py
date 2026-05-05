@@ -1,12 +1,12 @@
 import json
 
-from .redis_vector_store import RedisVectorStore
+from .vector_store import VectorStore
 
 
 class FaceIndexService:
-    def __init__(self, threshold=0.6):
+    def __init__(self, vector_store: VectorStore, threshold=0.6):
         self.threshold = threshold
-        self._store = RedisVectorStore()
+        self._store = vector_store
 
     def setup(self) -> None:
         self._store.setup_index()

@@ -5,13 +5,13 @@ vi.mock("onnxruntime-web", () => ({
   env: { wasm: {} },
 }));
 
-import { cropFace } from "./yoloOnnxService";
+import { cropFace } from "../ai";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("yoloOnnxService", () => {
+describe("AI faceUtils — cropFace", () => {
   it("exports mirrored crop bytes and mirrored local keypoints", async () => {
     const translate = vi.fn();
     const scale = vi.fn();

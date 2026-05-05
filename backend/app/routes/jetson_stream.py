@@ -1,9 +1,11 @@
+import os
+
 import cv2
 from flask import Blueprint, Response, stream_with_context
 
 jetson_stream_bp = Blueprint('jetson_stream', __name__)
 
-RTSP_URL = "rtsp://admin:Chimai@2026@10.10.10.64:554/Streaming/Channels/101"
+RTSP_URL = os.getenv("JETSON_RTSP_URL", "rtsp://localhost:554/stream")
 
 
 def get_camera_frame():

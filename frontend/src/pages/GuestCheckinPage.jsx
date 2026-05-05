@@ -3,14 +3,11 @@ import { Link } from "react-router-dom";
 
 import { useGuestCamera } from "../hooks/useGuestCamera";
 import { useYoloDetection } from "../hooks/useYoloDetection";
-import { submitGuestCheckin, submitGuestCheckinKpts, waitGuestCheckinTaskResult } from "../lib/guestApi";
+import { useJetsonRecognition } from "../hooks/useJetsonRecognition";
+import JetsonStream from "../components/JetsonStream";
+import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
 import "./GuestCheckinPage.css";
-
-// ── Jetson camera constants ──────────────────────────────────────────────────
-const JETSON_STREAM_URL = "/jetson/stream";
-const JETSON_FRAME_URL  = "/jetson/frame";
-const JETSON_SCAN_INTERVAL_MS = 1800; // grab a still every 1.8 s for recognition
 
 const MAX_HISTORY_ITEMS = 10;
 const CHECKIN_COOLDOWN_MS = 60000;
@@ -68,56 +65,6 @@ function getHistoryBadge(entry) {
   return "badge-error";
 }
 
-// ── JetsonStream ─────────────────────────────────────────────────────────────
-// Tách thành component riêng + React.memo để MJPEG <img> không bị remount
-// mỗi khi parent re-render. Khi Jetson không kết nối được, browser sẽ retry
-// liên tục gây broken-image flicker — onError dùng exponential backoff để
-// giảm tần suất retry thay vì để browser tự retry ngay lập tức.
-const JetsonStream = React.memo(function JetsonStream({ streamUrl }) {
-  const imgRef      = useRef(null);
-  const retryTimer  = useRef(null);
-  const retryDelay  = useRef(2000); // bắt đầu 2s, tăng dần tới 30s
-
-  const scheduleRetry = useCallback(() => {
-    if (retryTimer.current) return; // đã có timer đang chờ
-    retryTimer.current = setTimeout(() => {
-      retryTimer.current = null;
-      if (imgRef.current) {
-        // Gán lại src để browser thử load lại
-        imgRef.current.src = `${streamUrl}?t=${Date.now()}`;
-      }
-      // Tăng delay theo exponential backoff, tối đa 30s
-      retryDelay.current = Math.min(retryDelay.current * 2, 30000);
-    }, retryDelay.current);
-  }, [streamUrl]);
-
-  const handleLoad = useCallback(() => {
-    // Kết nối thành công — reset backoff
-    retryDelay.current = 2000;
-    if (retryTimer.current) {
-      clearTimeout(retryTimer.current);
-      retryTimer.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-    };
-  }, []);
-
-  return (
-    <img
-      ref={imgRef}
-      src={streamUrl}
-      alt="Jetson camera stream"
-      className="kiosk-video"
-      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-      onLoad={handleLoad}
-      onError={scheduleRetry}
-    />
-  );
-});
 
 function PerfHud({ getPerfSnapshot }) {
   const containerRef = useRef(null);
@@ -147,114 +94,6 @@ function PerfHud({ getPerfSnapshot }) {
   }, [getPerfSnapshot]);
 
   return <pre ref={containerRef} className="perf-hud">Loading...</pre>;
-}
-
-// ── useJetsonRecognition ─────────────────────────────────────────────────────
-// Periodically fetches a still JPEG from /jetson/frame, sends it to the
-// existing /api/guest/checkin endpoint, and returns the latest result.
-//
-// State machine:
-//   "disconnected"  — default; Jetson chưa từng phản hồi thành công
-//   "scanning"      — đang gửi request (chỉ hiển thị sau khi đã kết nối)
-//   "idle"          — request vừa xong, đang chờ interval tiếp theo
-//   "error"         — đã từng kết nối nhưng bị mất liên lạc
-//
-// Nguyên tắc: UI chỉ thay đổi khi state thực sự thay đổi (statusRef guard).
-// Trước khi có response thành công đầu tiên, mọi lỗi đều im lặng — hook
-// tiếp tục retry trong nền mà không làm giật UI.
-
-function useJetsonRecognition({ enabled }) {
-  const [jetsonResult, setJetsonResult] = useState(null);
-  // "disconnected" là trạng thái mặc định — chưa kết nối lần nào
-  const [jetsonStatus, setJetsonStatus] = useState("disconnected");
-
-  const inflightRef      = useRef(false);
-  const timerRef         = useRef(null);
-  const statusRef        = useRef("disconnected"); // shadow để dedup setState
-  const everConnectedRef = useRef(false);           // đã có response thành công chưa
-
-  // Chỉ gọi setJetsonStatus khi giá trị thực sự thay đổi
-  const setStatus = useCallback((next) => {
-    if (statusRef.current === next) return;
-    statusRef.current = next;
-    setJetsonStatus(next);
-  }, []);
-
-  const runScan = useCallback(async () => {
-    if (inflightRef.current) return;
-    inflightRef.current = true;
-
-    // Chỉ báo "scanning" nếu đã từng kết nối thành công — tránh
-    // nhấp nháy "scanning → disconnected → scanning" khi chưa có gì
-    if (everConnectedRef.current) {
-      setStatus("scanning");
-    }
-
-    try {
-      const frameResp = await fetch(JETSON_FRAME_URL);
-      if (!frameResp.ok) throw new Error(`Frame fetch failed: ${frameResp.status}`);
-      const blob = await frameResp.blob();
-      const file  = new File([blob], "jetson-frame.jpg", { type: "image/jpeg" });
-
-      const payload = await submitGuestCheckin(file);
-
-      // Lần đầu kết nối thành công — mở khoá hiển thị trạng thái
-      everConnectedRef.current = true;
-      setJetsonResult(payload);
-      setStatus("idle");
-    } catch (err) {
-      if (everConnectedRef.current) {
-        // Đã từng kết nối → báo lỗi để user biết bị mất liên lạc
-        setJetsonResult({
-          status: "network_error",
-          message: getFriendlyBackendErrorMessage(err, "Không thể kết nối Jetson camera."),
-          checked_in_at: new Date().toISOString(),
-        });
-        setStatus("error");
-      }
-      // Chưa từng kết nối → im lặng, giữ "disconnected", retry tiếp
-    } finally {
-      inflightRef.current = false;
-    }
-  }, [setStatus]);
-
-  // Đảm bảo chỉ reset và khởi động interval khi enabled chuyển từ false -> true
-  const prevEnabledRef = useRef(enabled);
-  useEffect(() => {
-    // Nếu tắt Jetson mode
-    if (!enabled) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-      // Reset toàn bộ khi tắt Jetson mode
-      everConnectedRef.current = false;
-      setStatus("disconnected");
-      prevEnabledRef.current = enabled;
-      return;
-    }
-
-    // Chỉ reset khi enabled chuyển từ false -> true
-    if (!prevEnabledRef.current && enabled) {
-      everConnectedRef.current = false;
-      setStatus("disconnected");
-    }
-    prevEnabledRef.current = enabled;
-
-    // Luôn chỉ tạo interval một lần khi enabled true
-    if (!timerRef.current) {
-      timerRef.current = setInterval(() => {
-        void runScan();
-      }, JETSON_SCAN_INTERVAL_MS);
-      void runScan();
-    }
-
-    // Cleanup interval khi unmount hoặc khi enabled chuyển về false
-    return () => {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    };
-  }, [enabled, runScan, setStatus]);
-
-  return { jetsonResult, jetsonStatus };
 }
 
 // ── Main page component ──────────────────────────────────────────────────────
@@ -661,7 +500,7 @@ export default function GuestCheckinPage() {
             {/* Jetson mode — MJPEG stream via <img> */}
             {isJetson && (
               <>
-                <JetsonStream streamUrl={JETSON_STREAM_URL} />
+                <JetsonStream />
                 {/* Scanning pulse overlay */}
                 <div
                   style={{

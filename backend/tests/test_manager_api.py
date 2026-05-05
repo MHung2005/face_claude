@@ -376,6 +376,10 @@ def test_manager_delete_employee_soft_deletes_and_clears_faces(app, client):
     class FakeFaceIndexService:
         def refresh(self):
             refresh_calls["count"] += 1
+        def upsert(self, **kwargs):
+            refresh_calls["count"] += 1
+        def delete_employee(self, employee_id):
+            refresh_calls["count"] += 1
 
     app.extensions["face_index_service"] = FakeFaceIndexService()
 
@@ -408,14 +412,14 @@ def test_manager_delete_employee_soft_deletes_and_clears_faces(app, client):
     assert response.get_json() == {
         "status": "deleted",
         "employee_id": employee["id"],
-        "deactivated": True,
+        "deleted_attendance_events": 0,
         "deleted_face_samples": 1,
     }
     assert refresh_calls["count"] == 1
 
     with app.app_context():
-        deleted_employee = db.session.get(Employee, employee["id"])
-        assert deleted_employee.is_active is False
+        deleted_employee = Employee.query.get(employee["id"])
+        assert deleted_employee is None
         assert FaceSample.query.filter_by(employee_id=employee["id"]).count() == 0
         assert FaceEmbedding.query.filter_by(employee_id=employee["id"]).count() == 0
         assert sample_path.exists() is False

@@ -1,5 +1,8 @@
-﻿from collections import defaultdict
-from datetime import datetime, date, time
+from collections import defaultdict
+from datetime import datetime, date, time, timezone, timedelta
+
+# Timezone Việt Nam (UTC+7)
+VN_TZ = timezone(timedelta(hours=7))
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_
@@ -37,7 +40,7 @@ def _derive_confidence(distance):
 
 class AttendanceService:
     def get_today_event(self, employee_id, checked_in_at=None):
-        checked_in_at = checked_in_at or datetime.now()
+        checked_in_at = checked_in_at or datetime.now(VN_TZ)
         checkin_date = checked_in_at.date().isoformat()
         return _find_existing_event(employee_id, checkin_date)
 
@@ -49,7 +52,7 @@ class AttendanceService:
         checked_in_at=None,
         skip_existing_lookup=False,
     ):
-        checked_in_at = checked_in_at or datetime.now()
+        checked_in_at = checked_in_at or datetime.now(VN_TZ)
         checkin_date = checked_in_at.date().isoformat()
         existing_event = None
         if not skip_existing_lookup:
@@ -131,7 +134,7 @@ class AttendanceService:
         }
 
     def get_dashboard_summary(self, now=None):
-        now = now or datetime.now()
+        now = now or datetime.now(VN_TZ)
         today = now.date()
         month_start = today.replace(day=1)
 

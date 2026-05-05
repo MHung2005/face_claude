@@ -16,7 +16,7 @@ import {
   detectFaces,
   isModelLoaded,
   loadModel,
-} from '../lib/yoloOnnxService'
+} from '../ai'
 import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from '../lib/guestApi'
 import { getFriendlyBackendErrorMessage } from '../lib/errorMessages'
 

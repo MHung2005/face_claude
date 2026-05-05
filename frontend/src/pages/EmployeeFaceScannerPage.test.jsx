@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 
 import { renderApp } from "../test/test-utils";
 
-vi.mock("../lib/yoloOnnxService", () => ({
+vi.mock("../ai", () => ({
   cropFace: vi.fn(),
   detectFaces: vi.fn().mockResolvedValue([]),
   isModelLoaded: vi.fn(() => true),
