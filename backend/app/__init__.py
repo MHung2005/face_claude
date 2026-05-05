@@ -142,5 +142,6 @@ def create_app(test_config=None):
     app.register_blueprint(guest_bp, url_prefix="/api")
     app.register_blueprint(manager_bp, url_prefix="/api")
     app.register_blueprint(face_enrollment_bp, url_prefix="/api")
+    app.register_blueprint(jetson_stream_bp) 
 
     return app
