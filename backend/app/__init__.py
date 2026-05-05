@@ -82,15 +82,16 @@ def _run_schema_updates():
 def _initialize_services(app):
     storage_service = StorageService(app.config["CHECKIN_DIR"], app.config["FACES_DIR"])
     embedding_service = EmbeddingService()
-    if not app.config.get("TESTING"):
-        embedding_logger.info("Pre-warming InsightFace model...")
-        try:
-            recognizer = embedding_service._get_insightface_recognizer()
-            dummy_face = np.zeros((112, 112, 3), dtype=np.uint8)
-            recognizer.get_feat(dummy_face)
-            embedding_logger.info("InsightFace model ready (including first inference warmup).")
-        except Exception:
-            embedding_logger.warning("InsightFace first-inference warmup failed, will warm on first request.", exc_info=True)
+    # Pre-warm InsightFace model at startup so first request is fast
+    embedding_logger = logging.getLogger(__name__)
+    embedding_logger.info("Pre-warming InsightFace model...")
+    recognizer = embedding_service._get_insightface_recognizer()
+    try:
+        dummy_face = np.zeros((112, 112, 3), dtype=np.uint8)
+        recognizer.get_feat(dummy_face)
+        embedding_logger.info("InsightFace model ready (including first inference warmup).")
+    except Exception:
+        embedding_logger.warning("InsightFace first-inference warmup failed, will warm on first request.", exc_info=True)
     face_index_service = FaceIndexService(vector_store=RedisVectorStore())
     face_index_service.setup()
     attendance_service = AttendanceService()

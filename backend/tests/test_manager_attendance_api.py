@@ -7,12 +7,10 @@ try:
     from backend.app.extensions import db
     from backend.app.models import AttendanceEvent, Employee, ManagerUser
     from backend.app.services import attendance as attendance_module
-    import backend.app.routes.manager as manager_attendance
 except ModuleNotFoundError:
     from app.extensions import db
     from app.models import AttendanceEvent, Employee, ManagerUser
     from app.services import attendance as attendance_module
-    import app.routes.manager as manager_attendance
 
 
 def _create_manager(app, username="manager", password="secret123"):
@@ -91,12 +89,12 @@ def test_manager_attendance_snapshot_requires_authentication(client):
 
 
 def test_manager_attendance_defaults_to_today_when_filters_missing(app, client, monkeypatch):
-    class FixedDateTime(datetime):
+    class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 3, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
 
-    monkeypatch.setattr(manager_attendance, "datetime", FixedDateTime)
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
 
     manager = _create_manager(app)
     employee_today = _create_employee(app, employee_code="EMP-100", full_name="Ada Lovelace")
@@ -123,12 +121,12 @@ def test_manager_attendance_defaults_to_today_when_filters_missing(app, client, 
 
 
 def test_manager_attendance_filters_by_date_range_and_search(app, client, monkeypatch):
-    class FixedDateTime(datetime):
+    class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 3, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
 
-    monkeypatch.setattr(manager_attendance, "datetime", FixedDateTime)
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
 
     manager = _create_manager(app)
     employee_a = _create_employee(app, employee_code="EMP-200", full_name="Ada Lovelace")
@@ -162,12 +160,12 @@ def test_manager_attendance_filters_by_date_range_and_search(app, client, monkey
 
 
 def test_manager_attendance_filters_by_department_and_position(app, client, monkeypatch):
-    class FixedDateTime(datetime):
+    class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 3, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
 
-    monkeypatch.setattr(manager_attendance, "datetime", FixedDateTime)
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
 
     manager = _create_manager(app)
     employee_a = _create_employee(app, employee_code="EMP-210", full_name="Ada Lovelace", department="Kỹ thuật", position="Kỹ sư")
@@ -196,12 +194,12 @@ def test_manager_attendance_filters_by_department_and_position(app, client, monk
 
 
 def test_manager_attendance_search_matches_employee_code_case_insensitively(app, client, monkeypatch):
-    class FixedDateTime(datetime):
+    class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 3, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
 
-    monkeypatch.setattr(manager_attendance, "datetime", FixedDateTime)
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
 
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-303", full_name="Ada Lovelace")
@@ -238,12 +236,12 @@ def test_manager_attendance_rejects_invalid_date_range(app, client):
 
 
 def test_manager_attendance_returns_snapshot_url_and_snapshot_bytes(app, client, monkeypatch):
-    class FixedDateTime(datetime):
+    class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 3, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 3, 10, 0, 0)
 
-    monkeypatch.setattr(manager_attendance, "datetime", FixedDateTime)
+    monkeypatch.setattr(attendance_module, "datetime", FixedDateTime)
 
     manager = _create_manager(app)
     employee = _create_employee(app, employee_code="EMP-404", full_name="Ada Lovelace")

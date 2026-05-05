@@ -97,29 +97,36 @@ def test_embedding_service_uses_yolo_and_insightface(monkeypatch, tmp_path):
             captured["img_shape"] = img.shape
             return np.array([0.1, 0.2, 0.3], dtype=np.float32)
 
-    class FakeDetector:
-        def detect(self, frame_bytes):
-            return self._mock_detect()
+    # -- Fake YOLO model that returns one detection with box + keypoints --
+    class FakeBoxes:
+        def __init__(self, img_h, img_w):
+            import torch
+            self.xyxy = torch.tensor([[5, 5, img_w - 5, img_h - 5]])
+            self.conf = torch.tensor([0.95])
 
-        def detect_from_ndarray(self, img):
-            return self._mock_detect()
+        def __len__(self):
+            return 1
 
-        def _mock_detect(self):
+    class FakeKeypoints:
+        def __init__(self, img_h, img_w):
+            import torch
             # 5 keypoints: left_eye, right_eye, nose, left_mouth, right_mouth
-            kps = np.array([
-                [15, 15], [35, 15], [25, 25], [15, 40], [35, 40]
-            ], dtype=int)
-            return [{
-                "box": (5, 5, 45, 45),
-                "keypoints": kps,
-                "score": 0.95
-            }]
+            self.xy = torch.tensor([[[15, 15], [img_w - 15, 15], [img_w // 2, img_h // 2],
+                                     [15, img_h - 10], [img_w - 15, img_h - 10]]], dtype=torch.float32)
+            self.conf = torch.tensor([[0.9, 0.9, 0.9, 0.9, 0.9]], dtype=torch.float32)
 
-    class FakeEmbedder:
-        def embed(self, aligned_face):
-            captured["img_type"] = type(aligned_face).__name__
-            captured["img_shape"] = aligned_face.shape
-            return [0.1, 0.2, 0.3]
+    class FakeDetectionResult:
+        def __init__(self, img_h, img_w):
+            self.boxes = FakeBoxes(img_h, img_w)
+            self.keypoints = FakeKeypoints(img_h, img_w)
+
+    class FakeYOLO:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def predict(self, img, conf=0.5, verbose=False):
+            h, w = img.shape[:2]
+            return [FakeDetectionResult(h, w)]
 
     # Create a small valid image (50x50 so crop is non-empty)
     test_img = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
@@ -132,13 +139,15 @@ def test_embedding_service_uses_yolo_and_insightface(monkeypatch, tmp_path):
         from app.services import embedding as embedding_mod
 
     service = embedding_mod.EmbeddingService()
-    service._detector = FakeDetector()
-    service._embedder = FakeEmbedder()
+    # Inject fake YOLO model directly (skip lazy-load)
+    service._yolo_model = FakeYOLO()
+    service._insightface_recognizer = FakeInsightFaceRecognizer()
 
     embeddings = service.extract_embeddings(frame_bytes)
 
     assert embeddings == [[0.1, 0.2, 0.3]]
-    assert captured["img_shape"] == (40, 40, 3)
+    assert captured["img_type"] == "ndarray"
+    assert captured["img_shape"] == (112, 112, 3)
 
 
 def test_storage_service_saves_guest_frame_under_dated_subdirectory(tmp_path, monkeypatch):
@@ -168,19 +177,22 @@ def test_face_index_service_uses_cosine_distance_for_thresholding(monkeypatch):
     except ModuleNotFoundError:
         from app.services.face_index import FaceIndexService
 
-    class DummyVectorStore:
-        def setup(self): pass
-        def clear(self): pass
-        def set_mapping(self, d): pass
-        def find_best_match(self, embedding, threshold):
-            return {
-                "employee_id": 7,
-                "employee_code": "EMP-007",
-                "full_name": "Ada Lovelace",
-                "distance": 0.0,
-            }
-
-    service = FaceIndexService(vector_store=DummyVectorStore(), threshold=0.01)
+    service = FaceIndexService(threshold=0.01)
+    monkeypatch.setattr(
+        service,
+        "refresh",
+        lambda: service._entries.__setitem__(
+            slice(None),
+            [
+                {
+                    "employee_id": 7,
+                    "employee_code": "EMP-007",
+                    "full_name": "Ada Lovelace",
+                    "embedding": [1.0, 0.0],
+                }
+            ],
+        ),
+    )
 
     match = service.find_match([10.0, 0.0])
 
@@ -195,30 +207,29 @@ def test_face_index_service_refreshes_on_each_find_match(monkeypatch):
     except ModuleNotFoundError:
         from app.services.face_index import FaceIndexService
 
-    class DummyVectorStore:
-        def __init__(self):
-            self.calls = 0
-        def setup(self): pass
-        def clear(self): pass
-        def set_mapping(self, d): pass
-        def find_best_match(self, embedding, threshold):
-            self.calls += 1
-            return {
-                "employee_id": self.calls,
-                "employee_code": f"EMP-{self.calls:03d}",
-                "full_name": f"Employee {self.calls}",
-                "distance": 0.0,
-            }
+    service = FaceIndexService(threshold=0.01)
+    refresh_calls = {"count": 0}
 
-    store = DummyVectorStore()
-    service = FaceIndexService(vector_store=store, threshold=0.01)
+    def fake_refresh():
+        refresh_calls["count"] += 1
+        employee_id = refresh_calls["count"]
+        service._entries = [
+            {
+                "employee_id": employee_id,
+                "employee_code": f"EMP-{employee_id:03d}",
+                "full_name": f"Employee {employee_id}",
+                "embedding": [1.0, 0.0],
+            }
+        ]
+
+    monkeypatch.setattr(service, "refresh", fake_refresh)
 
     first_match = service.find_match([1.0, 0.0])
     second_match = service.find_match([1.0, 0.0])
 
     assert first_match["employee_id"] == 1
     assert second_match["employee_id"] == 2
-    assert store.calls == 2
+    assert refresh_calls["count"] == 2
 
 
 def test_recognition_service_returns_no_face_when_embedding_list_is_empty():
@@ -332,8 +343,8 @@ def test_attendance_service_returns_existing_event_after_integrity_error(monkeyp
 
     class FixedDateTime:
         @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 4, 2, 10, 0, 0, tzinfo=tz)
+        def now(cls):
+            return datetime(2026, 4, 2, 10, 0, 0)
 
     existing_event = types.SimpleNamespace(
         employee_id=7,
