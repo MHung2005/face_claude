@@ -16,7 +16,7 @@ from ..services.auth import (
     serialize_employee,
     serialize_manager,
 )
-from .face_enrollment import _delete_face_samples_for_employee
+from .face_enrollment_service import FaceEnrollmentService
 from .helpers import (
     attendance_not_found,
     get_service,
@@ -191,7 +191,12 @@ def manager_delete_employee(employee_id):
 
     # --- Cascade cleanup (DB side via cascade relationships) ---
     # Delete face-related records and files first (outside transaction for file I/O)
-    deleted_face_samples = _delete_face_samples_for_employee(employee.id)
+    enrollment_service = FaceEnrollmentService(
+        embedding_service=get_service("embedding_service"),
+        storage_service=get_service("storage_service"),
+        face_index_service=get_service("face_index_service"),
+    )
+    deleted_face_sample_count = enrollment_service.delete_all(employee.id)
 
     # --- Hard-delete the employee (cascade deletes FaceSample, FaceEmbedding, AttendanceEvent) ---
     deleted_attendance_count = AttendanceEvent.query.filter_by(employee_id=employee.id).count()
@@ -202,7 +207,7 @@ def manager_delete_employee(employee_id):
         {
             "status": "deleted",
             "employee_id": employee.id,
-            "deleted_face_samples": len(deleted_face_samples),
+            "deleted_face_samples": deleted_face_sample_count,
             "deleted_attendance_events": deleted_attendance_count,
         }
     )
