@@ -584,19 +584,19 @@ export default function GuestCheckinPage() {
             Mở khu quản trị
           </Link>
 
-          {isJetson ? (
+          {/* {isJetson ? (
             <span className={`kiosk-live-pill tone-${jetsonLiveTone}`}>
               {jetsonStatus === "disconnected"
                 ? "Chưa kết nối"
                 : jetsonStatus === "scanning"
-                ? "Đang nhận diện..."
+                ? "Đang nhận diện"
                 : "Jetson Live"}
             </span>
           ) : (
             <span className={`kiosk-live-pill tone-${getTone(cameraReady ? result?.status : "network_error")}`}>
               {getStatusLabel(cameraState)}
             </span>
-          )}
+          )} */}
         </div>
       </section>
 
@@ -676,14 +676,14 @@ export default function GuestCheckinPage() {
                   }}
                 />
                 {/* Status badge top-right */}
-                <div className="overlay-status">
+                {/* <div className="overlay-status">
                   <span className={`scan-dot${jetsonStatus === "scanning" ? " active" : ""}`} />
                   {jetsonStatus === "disconnected"
                     ? "Chưa kết nối"
                     : jetsonStatus === "scanning"
                     ? "Đang phân tích..."
                     : "Jetson Camera"}
-                </div>
+                </div> */}
                 {/* Recognition result overlay bottom-left — shows name when recognized */}
                 {(result?.status === "recognized" || result?.status === "already_checked_in") &&
                   result?.full_name && (
