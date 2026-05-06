@@ -16,6 +16,8 @@ def get_camera_frame():
     cap.release()
     if not ret:
         return None
+    # Xoay ảnh 180 độ
+    frame = cv2.rotate(frame, cv2.ROTATE_180)
     return frame
 
 # MJPEG stream generator
@@ -28,6 +30,8 @@ def mjpeg_stream():
             ret, frame = cap.read()
             if not ret:
                 break
+            # Xoay ảnh 180 độ
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
             ret, jpeg = cv2.imencode('.jpg', frame)
             if not ret:
                 break

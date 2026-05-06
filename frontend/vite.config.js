@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true,
         },
+        "/jetson": {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
     test: {
