@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useGuestCamera } from "../hooks/useGuestCamera";
 import { useYoloDetection } from "../hooks/useYoloDetection";
 import { useJetsonRecognition } from "../hooks/useJetsonRecognition";
-import JetsonStream from "../components/JetsonStream";
+import JetsonStream, { JETSON_STREAM_URL } from "../components/JetsonStream";
 import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
 import "./GuestCheckinPage.css";

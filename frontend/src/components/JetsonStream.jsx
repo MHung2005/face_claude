@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef } from "react";
 
-const JETSON_STREAM_URL = "/jetson/stream";
+export const JETSON_STREAM_URL = "/jetson/stream";
 
 // ── JetsonStream ─────────────────────────────────────────────────────────────
 // Tách thành component riêng + React.memo để MJPEG <img> không bị remount

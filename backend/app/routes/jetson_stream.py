@@ -1,16 +1,19 @@
+import logging
 import os
 
 import cv2
 from flask import Blueprint, Response, stream_with_context
 
 jetson_stream_bp = Blueprint('jetson_stream', __name__)
+logger = logging.getLogger(__name__)
 
-RTSP_URL = os.getenv("JETSON_RTSP_URL", "rtsp://localhost:554/stream")
+RTSP_URL = "rtsp://admin:Chimai@2026@10.10.10.64:554/Streaming/Channels/101"
 
 
 def get_camera_frame():
     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
     if not cap.isOpened():
+        logger.error(f"Failed to connect to RTSP stream: {RTSP_URL}")
         return None
     ret, frame = cap.read()
     cap.release()
@@ -24,6 +27,7 @@ def get_camera_frame():
 def mjpeg_stream():
     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
     if not cap.isOpened():
+        logger.error(f"Failed to open RTSP stream: {RTSP_URL}")
         return
     try:
         while True:
