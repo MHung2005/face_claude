@@ -1,4 +1,5 @@
 import json
+import numpy as np
 
 from .vector_store import VectorStore
 
@@ -8,18 +9,22 @@ class FaceIndexService:
         self.threshold = threshold
         self._store = vector_store
 
+    @staticmethod
+    def _normalize(embedding: list[float]) -> list[float]:  # ← thêm method này
+        vec = np.array(embedding, dtype=np.float32)
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec = vec / norm
+        return vec.tolist()
+
     def setup(self) -> None:
         self._store.setup_index()
 
-    def upsert(
-        self,
-        employee_id: int,
-        sample_index: int,
-        employee_code: str,
-        full_name: str,
-        embedding: list[float],
-    ) -> None:
-        self._store.upsert_face_sample(employee_id, sample_index, employee_code, full_name, embedding)
+    def upsert(self, employee_id, sample_index, employee_code, full_name, embedding):
+        self._store.upsert_face_sample(
+            employee_id, sample_index, employee_code, full_name,
+            self._normalize(embedding)  
+        )
 
     def delete_sample(self, employee_id: int, sample_index: int) -> None:
         self._store.delete_face_sample(employee_id, sample_index)
@@ -31,26 +36,18 @@ class FaceIndexService:
         return self._store.find_best_match(embedding, threshold=self.threshold)
 
     def refresh(self) -> None:
-        """Reload the entire Redis index from database records.
-
-        Deletes all existing entries, then re-inserts every FaceSample
-        currently stored in the database. Call after batch enrollment
-        or any operation that commits DB records before Redis is updated.
-        """
-        # Import here to avoid circular imports at module level
         from ..extensions import db
         from ..models import FaceSample
-
         from .redis_client import get_redis
 
-        # Delete ALL face:* keys from Redis (wildcard pattern, not a real employee_id)
         r = get_redis()
         all_face_keys = r.keys("face:*")
         if all_face_keys:
             r.delete(*all_face_keys)
+
         samples = FaceSample.query.all()
         for sample in samples:
-            self._store.upsert_face_sample(
+            self.upsert(                                   
                 employee_id=sample.employee_id,
                 sample_index=sample.sample_index,
                 employee_code=sample.employee.employee_code,

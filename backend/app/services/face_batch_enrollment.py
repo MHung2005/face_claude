@@ -1,6 +1,8 @@
 import json
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..ai import FaceQualityScorer
 
 
@@ -63,13 +65,19 @@ class FaceBatchEnrollmentService:
                 rejected.append({"frame_index": zero_based_index + 1, "reason": "multiple_faces"})
                 continue
 
+            pose_hint = frame_hints.get(zero_based_index, "unknown")
+            quality_score = self._score_frame(frame_bytes, pose_hint, zero_based_index)
+            if quality_score < 0.3:
+                rejected.append({"frame_index": zero_based_index + 1, "reason": "low_quality"})
+                continue
+
             candidate = CandidateFrame(
                 frame_index=zero_based_index + 1,
                 filename=filename,
                 frame_bytes=frame_bytes,
                 embedding=[float(value) for value in embeddings[0]],
-                pose_label=frame_hints.get(zero_based_index, "unknown"),
-                quality_score=self._score_frame(frame_bytes, frame_hints.get(zero_based_index, "unknown"), zero_based_index),
+                pose_label=pose_hint,
+                quality_score=quality_score,
             )
 
             if self._is_duplicate(candidate, valid_frames):
@@ -155,9 +163,7 @@ class FaceBatchEnrollmentService:
 
     def _is_duplicate(self, candidate, accepted_frames):
         for existing in accepted_frames:
-            if existing.pose_label != candidate.pose_label:
-                continue
-            if self._cosine_distance(candidate.embedding, existing.embedding) < 0.02:
+            if self._cosine_distance(candidate.embedding, existing.embedding) < 0.05:
                 return True
         return False
 
@@ -193,15 +199,11 @@ class FaceBatchEnrollmentService:
     def _mean_embedding(self, embeddings):
         if not embeddings:
             return []
-
-        vector_length = len(embeddings[0])
-        totals = [0.0] * vector_length
-        for embedding in embeddings:
-            for index, value in enumerate(embedding):
-                totals[index] += float(value)
-
-        count = float(len(embeddings))
-        return [value / count for value in totals]
+        arr = np.mean(np.array(embeddings, dtype=np.float32), axis=0)
+        norm = np.linalg.norm(arr)
+        if norm > 0:
+            arr = arr / norm  # ✅ L2 normalize sau khi average
+        return arr.tolist()
 
     def _cosine_distance(self, left, right):
         return _quality_scorer.cosine_distance(left, right)
