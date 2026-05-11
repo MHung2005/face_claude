@@ -55,8 +55,8 @@ export function nms(detections, iouThreshold) {
  * và mảng keypoints đã re-map về tọa độ local trong crop.
  */
 export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
-  const vw = videoEl.videoWidth
-  const vh = videoEl.videoHeight
+  const vw = videoEl.videoWidth || videoEl.naturalWidth || videoEl.width || videoEl.clientWidth
+  const vh = videoEl.videoHeight || videoEl.naturalHeight || videoEl.height || videoEl.clientHeight
   const { box, keypoints } = detection
 
   const bw = box.x2 - box.x1
@@ -117,8 +117,8 @@ export async function cropFace(videoEl, detection, paddingRatio = 0.4) {
  * Letterbox resize (giữ tỷ lệ, đệm pixel xám 114/255).
  */
 export function preprocessFrame(videoEl, workCanvas, inputSize = 640) {
-  const vw = videoEl.videoWidth
-  const vh = videoEl.videoHeight
+  const vw = videoEl.videoWidth || videoEl.naturalWidth || videoEl.width || videoEl.clientWidth
+  const vh = videoEl.videoHeight || videoEl.naturalHeight || videoEl.height || videoEl.clientHeight
 
   workCanvas.width = inputSize
   workCanvas.height = inputSize

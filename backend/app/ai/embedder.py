@@ -35,7 +35,7 @@ class FaceEmbedder:
         self._rec_model_path = str(rec_model_path or default_rec_model_path)
         self._model_name = model_name
         self._det_size = tuple(det_size)
-        self._providers = list(providers or ["CPUExecutionProvider"])
+        self._providers = list(providers or ["CUDAExecutionProvider", "CPUExecutionProvider"])
         self._recognizer = None  # Lazy-loaded
 
     def get_recognizer(self):

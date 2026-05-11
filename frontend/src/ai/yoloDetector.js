@@ -92,7 +92,7 @@ export function isModelLoaded() {
 /**
  * Chạy inference và trả về danh sách khuôn mặt.
  *
- * @param {HTMLVideoElement} videoEl
+ * @param {HTMLVideoElement|HTMLImageElement} videoEl
  * @param {HTMLCanvasElement} workCanvas
  * @returns {Promise<{detections: Array, timing: object}>}
  */

@@ -52,7 +52,7 @@ function centroidDistance(boxA, boxB) {
  * @param {boolean} options.cameraReady - Camera đã sẵn sàng chưa
  * @returns {{ modelState, modelProgress, detections, tracks, onResult }}
  */
-export function useYoloDetection({ videoRef, enabled, cameraReady }) {
+export function useYoloDetection({ videoRef, imageRef, enabled, cameraReady }) {
   // --- State public ---
   const [modelState, setModelState] = useState('idle')  // idle | loading | ready | error
   const [modelProgress, setModelProgress] = useState(0)
@@ -191,8 +191,8 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   // ============================================================
   const updateTracks = useCallback((newDetections, videoEl) => {
     const tracks = tracksRef.current
-    const vw = videoEl.videoWidth || 1
-    const vh = videoEl.videoHeight || 1
+    const vw = videoEl.videoWidth || videoEl.naturalWidth || 1
+    const vh = videoEl.videoHeight || videoEl.naturalHeight || 1
     const frameArea = vw * vh
 
     // Đánh dấu tất cả tracks là "chưa match"
@@ -350,10 +350,31 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
   // Bước 6: Detection Loop (chạy liên tục khi enabled)
   // ============================================================
   useEffect(() => {
-    if (modelState !== 'ready' || !enabled || !cameraReady) {
+    // Determine source readiness: video or image (jetson)
+    const sourceEl = (videoRef && videoRef.current) || (imageRef && imageRef.current)
+    const sourceReady = sourceEl
+      ? (sourceEl.tagName === 'VIDEO' ? sourceEl.readyState >= 2 : (sourceEl.naturalWidth && sourceEl.naturalWidth > 0))
+      : false
+
+    console.debug('[useYoloDetection] loop gate', {
+      enabled,
+      cameraReady,
+      modelState,
+      hasSource: Boolean(sourceEl),
+      sourceTag: sourceEl?.tagName,
+      sourceReady,
+    })
+
+    if (modelState !== 'ready' || !enabled || !sourceReady) {
       loopActiveRef.current = false
       return
     }
+
+    console.debug('[useYoloDetection] detection loop starting', {
+      sourceTag: sourceEl?.tagName,
+      enabled,
+      cameraReady,
+    })
 
     loopActiveRef.current = true
     let rafId = null
@@ -365,11 +386,22 @@ export function useYoloDetection({ videoRef, enabled, cameraReady }) {
       if (now - lastDetectTimeRef.current >= DETECTION_INTERVAL_MS) {
         lastDetectTimeRef.current = now
 
-        const videoEl = videoRef.current
-        if (videoEl && videoEl.readyState >= 2 && workCanvasRef.current) {
+        const videoEl = (videoRef && videoRef.current) || (imageRef && imageRef.current)
+        const isVideo = videoEl && videoEl.tagName === 'VIDEO'
+        const ready = videoEl ? (isVideo ? videoEl.readyState >= 2 : videoEl.naturalWidth > 0) : false
+        if (videoEl && ready && workCanvasRef.current) {
           try {
+            console.debug('[useYoloDetection] detectFaces tick', {
+              sourceTag: videoEl.tagName,
+              width: videoEl.videoWidth || videoEl.naturalWidth,
+              height: videoEl.videoHeight || videoEl.naturalHeight,
+            })
             const { detections: dets, timing: detectTiming } = await detectFaces(videoEl, workCanvasRef.current)
             if (detectTiming) perfRef.current.detect = detectTiming
+            console.debug('[useYoloDetection] detectFaces result', {
+              count: dets.length,
+              timing: detectTiming,
+            })
             if (DEBUG_DETECTION && dets.length > 0) {
               console.warn(`[detectFaces] ✓ ${dets.length} face(s) detected`)
             }

@@ -119,6 +119,7 @@ export default function GuestCheckinPage() {
   const [manualFile, setManualFile]           = useState(null);
   const [showFallback, setShowFallback]       = useState(false);
   const [statusText, setStatusText]           = useState("AI đang quét khuôn mặt theo thời gian thực.");
+  const [jetsonFrameReady, setJetsonFrameReady] = useState(false);
   const overlayCanvasRef   = useRef(null);
   const overlayRafRef      = useRef(null);
   const lastCheckinRef     = useRef({ employeeId: null, timestamp: 0 });
@@ -126,7 +127,9 @@ export default function GuestCheckinPage() {
   const cameraReady = !isJetson && cameraState === "ready";
   const copy = useMemo(() => getGuestResultCopy(result), [result]);
 
-  // ── YOLO ONNX Hook — only active in webcam mode ──────────────────────────
+  // ── YOLO ONNX Hook — runs on webcam or Jetson image (when enabled) ──────
+  const jetsonImgRef = useRef(null);
+
   const {
     modelState,
     modelProgress,
@@ -135,12 +138,13 @@ export default function GuestCheckinPage() {
     getPerfSnapshot,
   } = useYoloDetection({
     videoRef,
-    enabled: cameraReady,
-    cameraReady,
+    imageRef: jetsonImgRef,
+    enabled: cameraReady || (isJetson && jetsonFrameReady),
+    cameraReady: cameraReady || (isJetson && jetsonFrameReady),
   });
 
-  // ── Jetson recognition hook ───────────────────────────────────────────────
-  const { jetsonResult, jetsonStatus } = useJetsonRecognition({ enabled: isJetson });
+  // ── Jetson recognition hook (legacy polling path) ───────────────────────
+  const { jetsonResult, jetsonStatus, everConnectedRef } = useJetsonRecognition({ enabled: isJetson });
 
   // ── Performance HUD ───────────────────────────────────────────────────────
   const [showPerfHud, setShowPerfHud] = useState(false);
@@ -197,36 +201,57 @@ export default function GuestCheckinPage() {
   // ── Bounding box overlay (webcam only) ───────────────────────────────────
   const drawOverlay = useCallback(() => {
     const canvas = overlayCanvasRef.current;
-    const video  = videoRef.current;
-    if (!canvas || !video) return;
+    const source = videoRef.current || jetsonImgRef.current;
+    if (!canvas || !source) {
+      console.debug('[GuestCheckinPage] drawOverlay skipped', {
+        hasCanvas: Boolean(canvas),
+        hasSource: Boolean(source),
+        isJetson,
+        jetsonFrameReady,
+        modelState,
+      });
+      return;
+    }
 
-    const vw = video.videoWidth  || 640;
-    const vh = video.videoHeight || 480;
-    const rw = video.offsetWidth  || vw;
-    const rh = video.offsetHeight || vh;
+    const vw = source.videoWidth || source.naturalWidth || 640;
+    const vh = source.videoHeight || source.naturalHeight || 480;
+    const rw = source.offsetWidth || vw;
+    const rh = source.offsetHeight || vh;
 
-    canvas.width  = rw;
+    canvas.width = rw;
     canvas.height = rh;
     const scaleX = rw / vw;
     const scaleY = rh / vh;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, rw, rh);
 
-    if (modelState !== "ready") return;
+    if (modelState !== "ready") {
+      console.debug('[GuestCheckinPage] drawOverlay waiting for model', { modelState, isJetson, jetsonFrameReady });
+      return;
+    }
 
     const tracks = getTracksSnapshot();
+    console.debug('[GuestCheckinPage] drawOverlay tracks', {
+      isJetson,
+      jetsonFrameReady,
+      trackCount: tracks.length,
+      sourceTag: source.tagName,
+      width: vw,
+      height: vh,
+    });
+    const mirrored = source === videoRef.current; // webcam video is mirrored via CSS
     for (const track of tracks) {
       const { box, state, result: trackResult } = track;
       if (!box) continue;
 
       const color = BOX_COLORS[state] || BOX_COLORS.detecting;
-      const w  = (box.x2 - box.x1) * scaleX;
-      const h  = (box.y2 - box.y1) * scaleY;
-      const x1 = rw - box.x2 * scaleX;
+      const w = (box.x2 - box.x1) * scaleX;
+      const h = (box.y2 - box.y1) * scaleY;
+      const x1 = mirrored ? rw - box.x2 * scaleX : box.x1 * scaleX;
       const y1 = box.y1 * scaleY;
 
       ctx.strokeStyle = color;
-      ctx.lineWidth   = 4;
+      ctx.lineWidth = 4;
       ctx.strokeRect(x1, y1, w, h);
 
       const label =
@@ -238,7 +263,7 @@ export default function GuestCheckinPage() {
 
       if (label) {
         ctx.font = "bold 16px system-ui, sans-serif";
-        const tw   = ctx.measureText(label).width;
+        const tw = ctx.measureText(label).width;
         const padX = 10;
         const labelH = 28;
         ctx.fillStyle = color;
@@ -247,10 +272,12 @@ export default function GuestCheckinPage() {
         ctx.fillText(label, x1 + padX, y1 + h + 20);
       }
     }
-  }, [modelState, getTracksSnapshot, videoRef]);
+  }, [modelState, getTracksSnapshot, videoRef, jetsonImgRef, jetsonFrameReady]);
 
   useEffect(() => {
-    if (!cameraReady || modelState !== "ready") return;
+    // Start RAF loop when model ready and either webcam or jetson source is available
+    const source = videoRef.current || jetsonImgRef.current;
+    if (modelState !== "ready" || !source) return;
     const tick = () => {
       drawOverlay();
       overlayRafRef.current = requestAnimationFrame(tick);
@@ -259,7 +286,7 @@ export default function GuestCheckinPage() {
     return () => {
       if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current);
     };
-  }, [cameraReady, modelState, drawOverlay]);
+  }, [modelState, drawOverlay, jetsonFrameReady]);
 
   // ── Dừng webcam khi chuyển sang Jetson, khởi động lại khi quay về webcam ──
   // Ngắt webcam ngay khi chuyển sang Jetson, không chờ effect chạy lại
@@ -500,7 +527,28 @@ export default function GuestCheckinPage() {
             {/* Jetson mode — MJPEG stream via <img> */}
             {isJetson && (
               <>
-                <JetsonStream />
+                <JetsonStream
+                  onFrame={(img) => {
+                    console.debug('[GuestCheckinPage] Jetson onFrame', {
+                      hasImg: Boolean(img),
+                      naturalWidth: img?.naturalWidth,
+                      naturalHeight: img?.naturalHeight,
+                    });
+                    jetsonImgRef.current = img;
+                    setJetsonFrameReady(Boolean(img));
+                  }}
+                />
+                <canvas                         
+                  ref={overlayCanvasRef}
+                  className="kiosk-detection-canvas"
+                  style={{
+                    position: "absolute",
+                    top: 0, left: 0,
+                    width: "100%", height: "100%",
+                    pointerEvents: "none",
+                  }}
+                />
+                
                 {/* Scanning pulse overlay */}
                 <div
                   style={{
