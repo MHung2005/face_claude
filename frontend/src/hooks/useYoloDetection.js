@@ -422,7 +422,7 @@ export function useYoloDetection({ videoRef, imageRef, enabled, cameraReady }) {
       loopActiveRef.current = false
       if (rafId) cancelAnimationFrame(rafId)
     }
-  }, [modelState, enabled, cameraReady, videoRef, updateTracks])
+  }, [modelState, enabled, cameraReady, videoRef, imageRef, updateTracks])
 
   // ============================================================
   // Bước 7: Export trạng thái tracks để UI vẽ bounding box

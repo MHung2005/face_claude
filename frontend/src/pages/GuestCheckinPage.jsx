@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 
 import { useGuestCamera } from "../hooks/useGuestCamera";
 import { useYoloDetection } from "../hooks/useYoloDetection";
-import { useJetsonRecognition } from "../hooks/useJetsonRecognition";
 import JetsonStream, { JETSON_STREAM_URL } from "../components/JetsonStream";
 import { submitGuestCheckinKpts, waitGuestCheckinTaskResult } from "../lib/guestApi";
 import { getFriendlyBackendErrorMessage, getGuestResultCopy } from "../lib/errorMessages";
@@ -143,8 +142,11 @@ export default function GuestCheckinPage() {
     cameraReady: cameraReady || (isJetson && jetsonFrameReady),
   });
 
-  // ── Jetson recognition hook (legacy polling path) ───────────────────────
-  const { jetsonResult, jetsonStatus, everConnectedRef } = useJetsonRecognition({ enabled: isJetson });
+  // ── Jetson recognition hook (disabled — YOLO detection handles checkin-kpts) ───
+  // const { jetsonResult, jetsonStatus, everConnectedRef } = useJetsonRecognition({ enabled: isJetson });
+  const jetsonResult = null;
+  const jetsonStatus = "disconnected";
+  const everConnectedRef = { current: false };
 
   // ── Performance HUD ───────────────────────────────────────────────────────
   const [showPerfHud, setShowPerfHud] = useState(false);
@@ -306,41 +308,19 @@ export default function GuestCheckinPage() {
   useEffect(() => () => stopCamera(), [stopCamera]);
 
   // ── Status text (Jetson mode) ─────────────────────────────────────────────
-  // Tách riêng khỏi webcam effect để tránh re-run không cần thiết.
-  // Không phụ thuộc vào `result` — chỉ dùng jetsonStatus và jetsonResult.
+  // Now driven by YOLO detection (same as webcam), not Jetson polling
   useEffect(() => {
     if (!isJetson) return;
-    if (jetsonStatus === "disconnected") {
-      setStatusText("Đang tìm kiếm Jetson camera, vui lòng đợi...");
+    if (modelState !== "ready") {
+      setStatusText("Đang nạp AI nhận diện...");
       return;
     }
-    if (jetsonStatus === "scanning") {
-      setStatusText("Đang gửi ảnh Jetson lên AI nhận diện...");
+    if (result?.message) {
+      setStatusText(result.message);
       return;
     }
-    if (jetsonResult?.status === "recognized" && jetsonResult?.full_name) {
-      setStatusText(`Nhận diện: ${jetsonResult.full_name} — Điểm danh thành công.`);
-      return;
-    }
-    if (jetsonResult?.status === "already_checked_in") {
-      setStatusText(`${jetsonResult.full_name || "Nhân viên"} đã điểm danh trước đó hôm nay.`);
-      return;
-    }
-    if (jetsonResult?.status === "unknown") {
-      setStatusText("Không xác định được khuôn mặt từ Jetson. Đang chờ khung hình tiếp theo...");
-      return;
-    }
-    if (jetsonResult?.status === "no_face") {
-      setStatusText("Chưa phát hiện khuôn mặt trong khung hình Jetson.");
-      return;
-    }
-    // Chỉ hiển thị "Jetson sẵn sàng" nếu đã từng kết nối thành công hoặc có kết quả
-    if (jetsonStatus === "idle" && (jetsonResult || jetsonResult === null && everConnectedRef?.current)) {
-      setStatusText("Jetson sẵn sàng");
-      return;
-    }
-    setStatusText("Jetson camera đang hoạt động");
-  }, [isJetson, jetsonStatus, jetsonResult]);
+    setStatusText("Jetson AI đang quét khuôn mặt theo thời gian thực.");
+  }, [isJetson, modelState, result]);
 
   // ── Status text (Webcam mode) ─────────────────────────────────────────────
   // Tách riêng khỏi Jetson effect. Chỉ chạy khi không ở Jetson mode.
@@ -404,14 +384,13 @@ export default function GuestCheckinPage() {
   const confidenceOffset = confidenceStroke - (confidence / 100) * confidenceStroke;
   const recentPersonName = result?.full_name || "Đang chờ AI xác nhận";
 
-  // ── Jetson display status pill ────────────────────────────────────────────
-  // "disconnected" hiển thị neutral (không đỏ) vì user chưa làm gì sai
+  // ── Jetson display status — driven by YOLO model & detection result ────────
   const jetsonLiveTone =
-    jetsonStatus === "disconnected" || jetsonStatus === "scanning"
+    modelState !== "ready"
       ? "scanning"
-      : jetsonResult?.status === "recognized" || jetsonResult?.status === "already_checked_in"
+      : result?.status === "recognized" || result?.status === "already_checked_in"
       ? "success"
-      : jetsonStatus === "error"
+      : result?.status === "unknown"
       ? "danger"
       : "scanning";
 
@@ -736,11 +715,11 @@ export default function GuestCheckinPage() {
                 <span>Trạng thái</span>
                 <strong>
                   {isJetson
-                    ? jetsonStatus === "disconnected"
-                      ? "Chưa kết nối"
-                      : jetsonStatus === "scanning"
-                      ? "Đang phân tích"
-                      : "Jetson sẵn sàng"
+                    ? modelState === "loading"
+                      ? "Đang nạp AI"
+                      : modelState === "ready"
+                      ? "AI sẵn sàng"
+                      : "Lỗi AI"
                     : getStatusLabel(cameraState)}
                 </strong>
               </div>
